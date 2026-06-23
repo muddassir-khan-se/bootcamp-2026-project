@@ -39,6 +39,7 @@ Thumbs.db
 
 # Project-specific
 *.log
+tickets.db
 .coverage
 htmlcov/
 .pytest_cache/
