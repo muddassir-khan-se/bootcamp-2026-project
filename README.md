@@ -1,225 +1,168 @@
-﻿# Customer Support SLA Escalation Engine
+﻿# Durable SLA Ticketing Service
 
 **Bootcamp 2026 Project** by Muddassir Khan
 
 ## Project Overview
 
-The Customer Support SLA Escalation Engine is a ticket management system designed to handle Service Level Agreement (SLA) timers for support tickets. The system tracks ticket creation, assignment, and escalation based on SLA rules, with special handling for process crashes and restarts.
+This repository implements a Python-based Customer Support SLA ticketing service. It provides ticket creation, claiming, inspection, and automatic escalation for tickets whose SLA deadline is missed.
+
+The design focuses on durability: SLA escalation decisions are persisted through SQLite so the system can recover from process restarts without losing escalation state.
 
 ## Key Features
 
-- **Ticket Lifecycle Management**: Create, claim, and track support tickets
-- **In-Memory SLA Timers**: Real-time SLA tracking with automatic escalation
-- **Crash Recovery**: Graceful handling of process restarts with timer persistence
-- **Escalation Workflow**: Automatic escalation when SLA thresholds are breached
-- **Unit Testing**: Comprehensive test coverage for all core components
-- **CI/CD Pipeline**: GitHub Actions for automated testing and validation
+- **Ticket lifecycle management**: Create, claim, inspect, and escalate tickets
+- **Durable SLA enforcement**: SLA deadlines are stored in SQLite and re-evaluated after restart
+- **Automatic escalation**: Tickets that exceed SLA deadline are escalated automatically
+- **Simple HTTP server**: REST-style API endpoints for ticket operations
+- **Test coverage**: `pytest` verifies core behavior and scheduler logic
 
-## Problem Statement
-
-Support tickets must be claimed by an agent within a guaranteed 1-hour SLA window. The system uses in-memory timers to track SLA deadlines. A critical challenge is ensuring ticket escalation continues even after process crashes or restarts, when the in-memory state is lost.
-
-## Project Goals
-
-1. Provide a clear API for ticket lifecycle operations (create, claim, check status)
-2. Enforce independent SLA monitoring with automatic escalation
-3. Record ticket state transitions with accurate timestamps
-4. Handle the failure mode where SLA timers disappear after restart
-5. Demonstrate resilience through comprehensive testing
-
-## Repository Structure
+## Current Repository Structure
 
 ```
 .
-├── src/                          # Source code
-│   ├── ticket.ts                 # Ticket model and interfaces
-│   ├── sla-manager.ts            # SLA timer management
-│   ├── ticket-service.ts         # Core ticket operations
-│   └── escalation-engine.ts      # Escalation logic
-├── tests/                        # Unit and integration tests
-│   ├── ticket.test.ts
-│   ├── sla-manager.test.ts
-│   ├── ticket-service.test.ts
-│   └── escalation-engine.test.ts
-├── screenshots/                  # Visual artifacts and demos
-├── .github/workflows/            # CI/CD configuration
-│   └── ci.yml                    # GitHub Actions workflow
-├── README.md                     # This file
-├── requirements.txt              # Project dependencies
-└── .gitignore                    # Git ignore rules
+├── src/
+│   ├── __init__.py
+│   ├── db.py
+│   ├── models.py
+│   ├── ticket_service.py
+│   ├── sla_scheduler.py
+│   └── server.py
+├── tests/
+│   ├── test_api.py
+│   └── test_sla_scheduler.py
+├── docs/
+│   ├── architecture.md
+│   ├── ai-review-summary.md
+│   └── failure-demo.md
+├── .github/workflows/
+│   └── ci.yml
+├── README.md
+├── requirements.txt
+├── tickets.db
+└── notify.log
 ```
 
-## Getting Started
+## Prerequisites
 
-### Prerequisites
+- Python 3.10+
+- `pip`
 
-- Node.js 20.x or later
-- npm or yarn
-- Git
-
-### Installation
+## Installation
 
 ```bash
-git clone https://github.com/muddassir-khan-se/bootcamp-2026-project.git
 cd bootcamp-2026-project
-npm install
+py -m pip install -r requirements.txt
 ```
 
-### Running Tests
+## Running Tests
 
 ```bash
-npm test
+py -m pytest -q
 ```
 
-### Building
+## Running the Service
+
+Start the ticket service:
 
 ```bash
-npm run build
+py src/server.py
+```
+
+By default, the service listens on `127.0.0.1:8000` and uses `./tickets.db` as the SQLite database.
+
+### Override default database path
+
+```powershell
+$env:TICKETS_DB_PATH = "C:\path\to\tickets.db"
+py src/server.py
+```
+
+## API Endpoints
+
+### Create ticket
+
+```http
+POST /tickets
+Content-Type: application/json
+
+{ "subject": "Example issue" }
+```
+
+### Claim ticket
+
+```http
+POST /tickets/{ticket_id}/claim
+Content-Type: application/json
+
+{ "agent": "agent-1" }
+```
+
+### Get ticket details
+
+```http
+GET /tickets/{ticket_id}
 ```
 
 ## Core Components
 
-### Ticket Model
-- **ID**: Unique identifier for each ticket
-- **Status**: open → claimed → escalated → resolved
-- **Priority**: low, medium, high
-- **SLA Deadline**: Calculated from creation time + SLA window
-- **Timestamps**: Created, claimed, escalated, resolved
+### `src/db.py`
+- Central SQLite connection manager
+- Supports `TICKETS_DB_PATH` environment override
+- Enables WAL mode for durability
 
-### SLA Manager
-- Tracks in-memory timers for each active ticket
-- Monitors SLA threshold breaches
-- Triggers escalation when SLA is exceeded
-- Handles timer restoration on system restart
+### `src/models.py`
+- Ticket dataclass representation
+- Serialization helpers for JSON responses
 
-### Escalation Engine
-- Evaluates escalation conditions
-- Updates ticket status and priority
-- Records escalation events with timestamps
-- Prevents duplicate escalation
+### `src/ticket_service.py`
+- Ticket creation and claim logic
+- SLA deadline storage and lookup
+- Escalation logic for overdue tickets
 
-### Ticket Service
-- Public API for ticket operations
-- Enforces business rules
-- Coordinates between components
-- Maintains ticket registry
+### `src/sla_scheduler.py`
+- Periodic background scheduler
+- Runs escalation checks every interval
+- Keeps escalation behavior durable and repeatable
 
-## API Reference
-
-```typescript
-// Create a new support ticket
-createTicket(subject: string, priority: 'low' | 'medium' | 'high'): Ticket
-
-// Claim a ticket for an agent
-claimTicket(ticketId: string, agentId: string): void
-
-// Retrieve ticket details
-getTicket(ticketId: string): Ticket | null
-
-// List all active tickets
-listActiveTickets(): Ticket[]
-
-// Check current SLA status
-checkSLAStatus(ticketId: string): SLAStatus
-
-// Resolve a ticket
-resolveTicket(ticketId: string): void
-```
+### `src/server.py`
+- Simple HTTP server for ticket API
+- Supports create, claim, and get operations
+- Bootstraps ticket table on startup
 
 ## Testing Strategy
 
-The project includes comprehensive unit tests covering:
-- ✅ Ticket creation and lifecycle transitions
-- ✅ SLA timer accuracy and escalation triggers
-- ✅ Edge cases (duplicate claims, expired deadlines)
-- ✅ Error handling and validation
-- ✅ Timestamp recording and audit trails
+The `tests/` directory validates:
+- Ticket creation and retrieval
+- Claiming tickets and status transitions
+- SLA escalation logic for overdue tickets
+- Scheduler execution and automatic escalation
 
-Run tests with:
-```bash
-npm test
-```
+## Dependency File
 
-Generate coverage report:
-```bash
-npm run test:coverage
-```
+`requirements.txt` contains Python test dependencies and runtime support for the project.
 
 ## Development Workflow
 
-1. **Create Feature Branch**:
+1. Create a feature branch:
    ```bash
-   git checkout -b muddassir-khan/use-case-name
-   ```
-
-2. **Implement Changes**: Add code to `src/` directory
-
-3. **Write Tests**: Add tests to `tests/` directory
-
-4. **Run Tests Locally**:
+git checkout -b feature/your-description
+```
+2. Add or update code in `src/`
+3. Add tests in `tests/`
+4. Run:
    ```bash
-   npm test
-   ```
+py -m pytest -q
+```
+5. Commit and push your changes
+6. Open a pull request
 
-5. **Commit Changes**:
-   ```bash
-   git add .
-   git commit -m "[Bootcamp 2026] Use Case: Brief description"
-   ```
+## Notes
 
-6. **Push and Create PR**:
-   ```bash
-   git push -u origin muddassir-khan/use-case-name
-   ```
-
-7. **Create Pull Request** with title:
-   ```
-   [Bootcamp 2026] Muddassir Khan — Customer Support SLA Escalation Engine
-   ```
-
-## Continuous Integration
-
-GitHub Actions CI runs automatically on every push and pull request:
-- Runs complete test suite
-- Validates code style
-- Checks build process
-- Generates coverage metrics
-
-See `.github/workflows/ci.yml` for details.
-
-## Known Limitations & Failure Modes
-
-1. **In-Memory State Loss**: SLA timers are stored in-memory; process crashes will lose this state
-2. **Single Process**: Current implementation assumes single-process execution
-3. **Persistence**: No persistence layer; consider database integration for production
-
-## Future Enhancements
-
-- [ ] Database persistence for SLA state
-- [ ] Distributed system support (multiple processes/servers)
-- [ ] Advanced escalation rules engine
-- [ ] REST API interface
-- [ ] Real-time notifications
-- [ ] Analytics and reporting dashboard
-
-## Contributing
-
-When contributing to this project:
-1. Follow the development workflow above
-2. Ensure all tests pass locally
-3. Add new tests for new features
-4. Update documentation as needed
-5. Request code review before merging
-
-## References
-
-- [Bootcamp 2026 Guidelines](https://bootcamp2026.example.com)
-- [SLA Best Practices](https://example.com/sla-guide)
-- [TypeScript Documentation](https://www.typescriptlang.org/docs/)
+- The service is intentionally lightweight and single-process.
+- SQLite is used for persistence and recovery.
+- `notify.log` records escalation notification events.
 
 ---
 
 **Project Status**: Active Development  
-**Last Updated**: June 22, 2026  
-**Author**: Muddassir Khan  
-**License**: Bootcamp 2026 Program
+**Author**: Muddassir Khan
