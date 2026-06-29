@@ -1,46 +1,44 @@
 # AI Review Summary — Carfullfy SLA Escalation Engine
 
-## Scope
+> **Scope:** Audit of system correctness, durability across restarts, concurrency handling, and observability.
 
-This review inspects the proposed local implementation of the SLA escalation engine and the scaffolded artifacts in the repository. The focus areas are correctness (no lost SLA breaches), durability across restarts, concurrency, and testability.
+---
 
-## Key Findings
+## Executive Summary & Findings Status
 
-1. Ephemeral SLA timers (high severity)
-	- Current local approach spawns one in-memory thread per ticket to wait for the SLA deadline. If the process restarts or crashes, these timers are lost and pending tickets will never be escalated.
+| Finding | Severity | Status | Implementation Summary |
+| :--- | :---: | :---: | :--- |
+| **1. Ephemeral SLA Timers** | High | ✅ Resolved | Replaced per-ticket in-memory threads with a single DB-backed scheduler daemon thread and startup recovery scan. |
+| **2. Race Conditions & Double-Escalation** | Medium | ✅ Resolved | Implemented atomic SQL check-and-set (`UPDATE ... WHERE status = 'open'`) with SQLite WAL mode and thread locks. |
+| **3. Observability Gaps** | Medium | ✅ Resolved | Added full lifecycle timestamps, `notify.log` audit trailing, and real-time frontend Activity Feed. |
+| **4. Scalability Concerns** | Low | ✅ Resolved | Replaced $O(N)$ thread overhead with a single periodic SQL query. |
+| **5. Concurrency Testing** | Medium | 🟡 Partial | Core scheduler tests present; explicit multithreaded race test recommended for future scope. |
 
-2. Race conditions and potential double-escalation (medium severity)
-	- Without transactional checks or row-level locking, a claim arriving at the same time an SLA timer fires can lead to both `claimed` and `escalated` transitions occurring, or inconsistent state.
+---
 
-3. Observability gaps (low/medium severity)
-	- There are no structured audit trails or mandatory timestamps for all transitions. This makes post-mortem and SLA reporting harder.
+## Technical Resolution Overview
 
-4. Scalability concerns (low severity)
-	- One thread per ticket does not scale well for large volumes; also increases memory pressure and scheduling jitter.
+### 1. Durability (DB-Backed Scheduler)
+- **Mechanism:** Persists `sla_deadline` in SQLite (`tickets.db`). `SlaScheduler` polls every 5s (`SELECT ... WHERE status = 'open' AND sla_deadline <= NOW()`).
+- **Crash Recovery:** Runs an immediate scan on server startup to catch overdue tickets from downtime.
 
-5. Testing strategy missing for concurrency (medium severity)
-	- Unit and integration tests should include deterministic concurrency tests that assert exactly-one outcome when claim and escalation are concurrent.
+### 2. Concurrency Control (Atomic Transitions)
+- **Atomic SQL:** Both claim and escalation execute:
+  ```sql
+  UPDATE tickets SET status = ?, ... WHERE id = ? AND status = 'open';
+  ```
+- **Guarantees:** If `rowcount == 0`, the state already transitioned. Exactly one outcome (claimed or escalated) occurs.
 
-## Recommendations
+### 3. Observability & Monitoring
+- **Timestamps:** `created_at`, `sla_deadline`, `claimed_at`, `escalated_at`.
+- **Audit Logs:** Escalations logged to `notify.log`; live Activity Feed displayed on dashboard.
+- **Web Dashboard:** Real-time polling (3s), SLA countdown bars (1s), filter tabs, search, priority badges, and toast notifications.
 
-- Replace ephemeral threads with a durable scheduling mechanism: persist `sla_deadline` on the ticket row and use a scheduler or delayed-job queue to surface deadlines.
-- Ensure atomic transitions via transactional check-and-set (e.g., `SELECT ... FOR UPDATE`) so `open→claimed` and `open→escalated` are serialized.
-- Make escalation idempotent: workers should record attempts and skip if `escalated_at` is already set.
-- Add structured logging for `ticket_created`, `ticket_claimed`, and `ticket_escalated` including timestamps, actor, and ticket id.
-- For local demos, use SQLite + a short-interval scheduler (every 5s) to reconcile missed deadlines on startup.
+---
 
-## Test Suggestions
+## Future Recommendations & Operational Notes
 
-- Concurrency unit tests that simulate a claim and an escalation race; assert exactly-one final state.
-- Integration failure demo: create tickets, terminate the service mid-countdown, restart, and verify the scheduler escalates pending tickets.
-- Property tests for idempotency of escalation worker.
-
-## Security & Operational Notes
-
-- Protect any external notification channels (email/SMS/webhooks) with retry/backoff and authentication.
-- Add health checks and metrics for pending SLA jobs, processed escalations, and failed notifications.
-
-## Conclusion
-
-The primary correctness issue is durability of SLA timers. Moving scheduling into a durable, transactional mechanism with idempotent workers will close the main failure mode while improving observability and scalability.
-
+- **Concurrency Testing:** Add an explicit race-condition unit test simulating simultaneous claim and escalation threads.
+- **Structured Logging:** Upgrade file appends to Python's structured `logging` with rotating handlers.
+- **Operational Monitoring:** Add a `GET /health` endpoint reporting scheduler heartbeat and pending SLA metrics.
+- **Production Scaling:** Migrate from SQLite to PostgreSQL for high write throughput and replace local logging with webhook/email alerting channels.

@@ -1,10 +1,19 @@
-﻿from __future__ import annotations
+"""
+Carfullfy SLA Escalation Engine - SLA Scheduler Daemon Thread.
+Periodically scans database for overdue open tickets and executes immediate crash recovery scans on startup.
+Author: Muddassir Khan | Bootcamp 2026
+"""
+
+from __future__ import annotations
 
 import threading
 from datetime import datetime
 from typing import Optional
 
-from .ticket_service import escalate_due_tickets
+try:
+    from .ticket_service import escalate_due_tickets
+except ImportError:
+    from ticket_service import escalate_due_tickets
 
 
 class SlaScheduler(threading.Thread):

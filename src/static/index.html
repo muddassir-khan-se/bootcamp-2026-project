@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Carfullfy SLA Escalation Engine — Real-time support ticket monitoring with automatic SLA enforcement, escalation tracking, and durable crash recovery.">
+    <meta name="keywords" content="SLA, ticketing, escalation, support, monitoring, durable scheduler">
+    <meta name="author" content="Muddassir Khan">
+    <meta property="og:title" content="Carfullfy — SLA Escalation Engine">
+    <meta property="og:description" content="Real-time support ticket monitoring with automatic SLA enforcement and escalation tracking.">
+    <meta property="og:type" content="website">
+    <title>Carfullfy — SLA Escalation Engine</title>
+    <!-- Google Fonts: Inter & Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+    <div class="app-container">
+        <!-- ── Header ──────────────────────────────────────────── -->
+        <header class="main-header">
+            <div class="logo-area">
+                <div class="logo-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M12 6V12L16 14" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <div class="logo-text">
+                    <h1>Carfullfy</h1>
+                    <span>SLA Escalation Engine</span>
+                </div>
+            </div>
+
+            <div class="header-right">
+                <div class="system-status" id="system-status">
+                    <span class="status-dot green animate-pulse"></span>
+                    <span class="status-text">SLA Monitor: Active (5s)</span>
+                </div>
+
+                <!-- Dark Mode Toggle -->
+                <button id="btn-dark-mode" class="btn-icon-round" title="Toggle dark mode" aria-label="Toggle dark mode">
+                    <svg id="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                    <svg id="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- ── Stats Grid ─────────────────────────────────────── -->
+        <section class="stats-grid" aria-label="Ticket statistics">
+            <div class="stat-card" id="stat-total">
+                <div class="stat-icon purple">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                </div>
+                <div class="stat-info">
+                    <h3>Total Tickets</h3>
+                    <p class="stat-value" id="val-total">0</p>
+                </div>
+            </div>
+            <div class="stat-card" id="stat-open">
+                <div class="stat-icon yellow">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                </div>
+                <div class="stat-info">
+                    <h3>Open Tickets</h3>
+                    <p class="stat-value" id="val-open">0</p>
+                </div>
+            </div>
+            <div class="stat-card" id="stat-claimed">
+                <div class="stat-icon blue">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                </div>
+                <div class="stat-info">
+                    <h3>Claimed</h3>
+                    <p class="stat-value" id="val-claimed">0</p>
+                </div>
+            </div>
+            <div class="stat-card" id="stat-escalated">
+                <div class="stat-icon red">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                </div>
+                <div class="stat-info">
+                    <h3>Escalated</h3>
+                    <p class="stat-value" id="val-escalated">0</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── Main Workspace ─────────────────────────────────── -->
+        <main class="workspace">
+
+            <!-- ── Left Sidebar ───────────────────────────────── -->
+            <div class="sidebar-panel">
+
+                <!-- Create Ticket Form -->
+                <div class="glass-panel form-panel">
+                    <h2>Create New Ticket</h2>
+                    <p class="panel-desc">Submit a support query. An agent must claim it within <strong>60 seconds</strong> to satisfy the SLA. Press <kbd>N</kbd> to focus.</p>
+                    <form id="create-ticket-form" novalidate>
+                        <div class="form-group">
+                            <label for="ticket-subject">Ticket Subject</label>
+                            <input type="text" id="ticket-subject" placeholder="e.g. System crash in database…" required autocomplete="off" maxlength="200">
+                        </div>
+                        <div class="form-group">
+                            <label for="ticket-priority">Priority Level</label>
+                            <div class="priority-selector" id="priority-selector" role="radiogroup" aria-label="Priority level">
+                                <button type="button" class="priority-btn" data-priority="low" aria-pressed="false">
+                                    <span class="priority-dot low"></span> Low
+                                </button>
+                                <button type="button" class="priority-btn active" data-priority="medium" aria-pressed="true">
+                                    <span class="priority-dot medium"></span> Medium
+                                </button>
+                                <button type="button" class="priority-btn" data-priority="high" aria-pressed="false">
+                                    <span class="priority-dot high"></span> High
+                                </button>
+                                <button type="button" class="priority-btn" data-priority="critical" aria-pressed="false">
+                                    <span class="priority-dot critical"></span> Critical
+                                </button>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary" id="btn-create">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                            <span>Create Ticket</span>
+                        </button>
+                    </form>
+                </div>
+
+                <!-- SLA Policies Info -->
+                <div class="glass-panel info-panel mt-4">
+                    <h2>SLA Policies</h2>
+                    <ul class="policy-list">
+                        <li>
+                            <span class="policy-dot orange"></span>
+                            <div>
+                                <strong>SLA Claim Limit:</strong>
+                                60 seconds from creation to first claim.
+                            </div>
+                        </li>
+                        <li>
+                            <span class="policy-dot red"></span>
+                            <div>
+                                <strong>Breach Escalation:</strong>
+                                Automated manager alert via background scheduler every 5 seconds.
+                            </div>
+                        </li>
+                        <li>
+                            <span class="policy-dot green"></span>
+                            <div>
+                                <strong>Durability Guarantee:</strong>
+                                SLA timers persist in SQLite and resume check immediately on server restart.
+                            </div>
+                        </li>
+                        <li>
+                            <span class="policy-dot blue"></span>
+                            <div>
+                                <strong>Atomic Transitions:</strong>
+                                DB-level check prevents double-escalation on concurrent claim + timeout.
+                            </div>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Activity Feed -->
+                <div class="glass-panel activity-panel mt-4">
+                    <div class="activity-header">
+                        <h2>Activity Feed</h2>
+                        <button id="btn-clear-activity" class="btn-text-small" title="Clear activity log">Clear</button>
+                    </div>
+                    <ul class="activity-list" id="activity-list">
+                        <li class="activity-empty">No recent activity.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- ── Content Panel ──────────────────────────────── -->
+            <div class="content-panel">
+                <div class="glass-panel list-panel">
+                    <div class="panel-header">
+                        <div>
+                            <h2>Support Tickets Monitor</h2>
+                            <span class="last-refreshed" id="last-refreshed">Connecting…</span>
+                        </div>
+                        <div class="panel-actions">
+                            <button id="btn-refresh" class="btn-icon-round" title="Refresh list" aria-label="Refresh ticket list">
+                                <svg id="refresh-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Filter Tabs -->
+                    <div class="filter-tabs" id="filter-tabs" role="tablist" aria-label="Filter tickets by status">
+                        <button class="filter-tab active" data-filter="all" role="tab" aria-selected="true">All</button>
+                        <button class="filter-tab" data-filter="open" role="tab" aria-selected="false">
+                            <span class="tab-dot open"></span> Open
+                        </button>
+                        <button class="filter-tab" data-filter="claimed" role="tab" aria-selected="false">
+                            <span class="tab-dot claimed"></span> Claimed
+                        </button>
+                        <button class="filter-tab" data-filter="escalated" role="tab" aria-selected="false">
+                            <span class="tab-dot escalated"></span> Escalated
+                        </button>
+                    </div>
+
+                    <!-- Search -->
+                    <div class="search-bar-wrap">
+                        <svg class="search-icon-inline" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        <input type="search" id="search-input" class="search-input" placeholder="Search tickets by subject…" autocomplete="off" aria-label="Search tickets">
+                    </div>
+
+                    <!-- Tickets List -->
+                    <div id="tickets-container" class="tickets-list">
+                        <div class="empty-state loading-state">
+                            <div class="spinner"></div>
+                            <p>Connecting to backend API…</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- ── Claim Modal ──────────────────────────────────────── -->
+    <div id="claim-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-content glass-panel">
+            <div class="modal-header">
+                <h2 id="modal-title">Claim Ticket</h2>
+                <button class="modal-close-btn" id="btn-modal-close" aria-label="Close modal">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <p>Enter your agent ID or name to take ownership of this ticket and stop the SLA countdown.</p>
+            <form id="claim-ticket-form" novalidate>
+                <input type="hidden" id="claim-ticket-id">
+                <div class="form-group">
+                    <label for="agent-name">Agent ID / Name</label>
+                    <input type="text" id="agent-name" placeholder="e.g. Agent Alpha" required autocomplete="off" maxlength="80">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" id="btn-cancel-claim" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        Confirm Claim
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

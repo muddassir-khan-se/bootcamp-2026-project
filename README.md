@@ -1,168 +1,95 @@
-﻿# Durable SLA Ticketing Service
+# Carfullfy — Durable SLA Ticketing Engine
 
-**Bootcamp 2026 Project** by Muddassir Khan
+> **Bootcamp 2026 Project** · Author: Muddassir Khan
 
-## Project Overview
-
-This repository implements a Python-based Customer Support SLA ticketing service. It provides ticket creation, claiming, inspection, and automatic escalation for tickets whose SLA deadline is missed.
-
-The design focuses on durability: SLA escalation decisions are persisted through SQLite so the system can recover from process restarts without losing escalation state.
-
-## Key Features
-
-- **Ticket lifecycle management**: Create, claim, inspect, and escalate tickets
-- **Durable SLA enforcement**: SLA deadlines are stored in SQLite and re-evaluated after restart
-- **Automatic escalation**: Tickets that exceed SLA deadline are escalated automatically
-- **Simple HTTP server**: REST-style API endpoints for ticket operations
-- **Test coverage**: `pytest` verifies core behavior and scheduler logic
-
-## Current Repository Structure
-
-```
-.
-├── src/
-│   ├── __init__.py
-│   ├── db.py
-│   ├── models.py
-│   ├── ticket_service.py
-│   ├── sla_scheduler.py
-│   └── server.py
-├── tests/
-│   ├── test_api.py
-│   └── test_sla_scheduler.py
-├── docs/
-│   ├── architecture.md
-│   ├── ai-review-summary.md
-│   └── failure-demo.md
-├── .github/workflows/
-│   └── ci.yml
-├── README.md
-├── requirements.txt
-├── tickets.db
-└── notify.log
-```
-
-## Prerequisites
-
-- Python 3.10+
-- `pip`
-
-## Installation
-
-```bash
-cd bootcamp-2026-project
-py -m pip install -r requirements.txt
-```
-
-## Running Tests
-
-```bash
-py -m pytest -q
-```
-
-## Running the Service
-
-Start the ticket service:
-
-```bash
-py src/server.py
-```
-
-By default, the service listens on `127.0.0.1:8000` and uses `./tickets.db` as the SQLite database.
-
-### Override default database path
-
-```powershell
-$env:TICKETS_DB_PATH = "C:\path\to\tickets.db"
-py src/server.py
-```
-
-## API Endpoints
-
-### Create ticket
-
-```http
-POST /tickets
-Content-Type: application/json
-
-{ "subject": "Example issue" }
-```
-
-### Claim ticket
-
-```http
-POST /tickets/{ticket_id}/claim
-Content-Type: application/json
-
-{ "agent": "agent-1" }
-```
-
-### Get ticket details
-
-```http
-GET /tickets/{ticket_id}
-```
-
-## Core Components
-
-### `src/db.py`
-- Central SQLite connection manager
-- Supports `TICKETS_DB_PATH` environment override
-- Enables WAL mode for durability
-
-### `src/models.py`
-- Ticket dataclass representation
-- Serialization helpers for JSON responses
-
-### `src/ticket_service.py`
-- Ticket creation and claim logic
-- SLA deadline storage and lookup
-- Escalation logic for overdue tickets
-
-### `src/sla_scheduler.py`
-- Periodic background scheduler
-- Runs escalation checks every interval
-- Keeps escalation behavior durable and repeatable
-
-### `src/server.py`
-- Simple HTTP server for ticket API
-- Supports create, claim, and get operations
-- Bootstraps ticket table on startup
-
-## Testing Strategy
-
-The `tests/` directory validates:
-- Ticket creation and retrieval
-- Claiming tickets and status transitions
-- SLA escalation logic for overdue tickets
-- Scheduler execution and automatic escalation
-
-## Dependency File
-
-`requirements.txt` contains Python test dependencies and runtime support for the project.
-
-## Development Workflow
-
-1. Create a feature branch:
-   ```bash
-git checkout -b feature/your-description
-```
-2. Add or update code in `src/`
-3. Add tests in `tests/`
-4. Run:
-   ```bash
-py -m pytest -q
-```
-5. Commit and push your changes
-6. Open a pull request
-
-## Notes
-
-- The service is intentionally lightweight and single-process.
-- SQLite is used for persistence and recovery.
-- `notify.log` records escalation notification events.
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square)](https://python.org)
+[![Tests](https://img.shields.io/badge/Tests-pytest-brightgreen?style=flat-square)](#quick-start)
+[![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
 ---
 
-**Project Status**: Active Development  
-**Author**: Muddassir Khan
+## Overview
+
+**Carfullfy** is a durable Python Customer Support SLA Ticketing Engine with a real-time web dashboard. SLA timers are persisted in SQLite, ensuring automatic escalation recovery across crashes and process restarts.
+
+---
+
+## Quick Start
+
+```bash
+# Install
+git clone https://github.com/muddassir-khan-se/bootcamp-2026-project.git
+cd bootcamp-2026-project
+py -m pip install -r requirements.txt
+
+# Run Tests
+py -m pytest -q
+
+# Start Service (Server + SLA Scheduler + Web Dashboard)
+py src/server.py
+```
+> Access live dashboard at `http://127.0.0.1:8000`. Override DB path via `$env:TICKETS_DB_PATH`.
+
+---
+
+## Key Features
+
+| Feature | Description |
+| :--- | :--- |
+| 🎟 **Ticket Lifecycle** | REST API for creation, claiming, inspection, and auto-escalation |
+| ⏱ **Durable Enforcement** | SQLite deadline storage surviving process restarts |
+| 🔁 **Auto-Escalation** | Background scheduler scanning every 5s for overdue tickets |
+| 🔒 **Atomic State Check** | `UPDATE WHERE status = 'open'` prevents double-escalation |
+| 🖥 **Live Dashboard** | Real-time UI with filters, search, countdowns, and dark mode |
+| 📋 **Audit Activity Feed** | In-browser live event trail (creation, claims, escalations) |
+| 🎯 **Priority Levels** | Low / Medium / High / Critical priority options |
+
+---
+
+## REST API Reference
+
+All endpoints accept/return JSON with ISO 8601 UTC timestamps.
+
+| Method | Endpoint | Description | Sample Payload / Response |
+| :---: | :--- | :--- | :--- |
+| `POST` | `/tickets` | Create a new ticket | Req: `{"subject": "DB crash"}`<br>Res `201`: `{"id": "...", "status": "open", "sla_deadline": "..."}` |
+| `GET` | `/tickets` | List all tickets | Res `200`: `[{"id": "...", "status": "open"}, ...]` |
+| `GET` | `/tickets/{id}` | Get ticket by UUID | Res `200`: `{"id": "...", ...}` \| `404`: `{"error": "ticket_not_found"}` |
+| `POST` | `/tickets/{id}/claim` | Claim open ticket | Req: `{"agent": "Agent A"}`<br>Res `200`: `{"status": "claimed", "claimed_by": "Agent A"}` |
+
+---
+
+## Project Architecture & Structure
+
+```
+bootcamp-2026-project/
+├── src/
+│   ├── db.py               # SQLite connection context manager (WAL mode, Thread Lock)
+│   ├── models.py           # Ticket dataclass & serialization helpers
+│   ├── ticket_service.py   # Business logic (create, claim, escalate)
+│   ├── sla_scheduler.py    # Daemon thread (5s polling & startup crash recovery pass)
+│   ├── server.py           # BaseHTTPRequestHandler API & static file router
+│   └── static/             # Vanilla JS, CSS design system, HTML dashboard shell
+├── tests/                  # Pytest unit & integration suite
+└── docs/                   # System design, AI audit summary, failure demo guide
+```
+
+---
+
+## Core SLA Parameters
+
+| Parameter | Value | Details |
+| :--- | :--- | :--- |
+| **SLA Limit** | 60 Seconds | Deadline set on creation (`created_at + 60s`) |
+| **Poll Interval** | 5 Seconds | Background scheduler scan frequency |
+| **Notifications** | `notify.log` | Escalation log append target |
+
+---
+
+## Project Documentation
+
+| Document | Purpose |
+| :--- | :--- |
+| 📐 [`docs/architecture.md`](docs/architecture.md) | System design, state machine, sequence diagrams, and concurrency guarantees |
+| 🧪 [`docs/failure-demo.md`](docs/failure-demo.md) | Step-by-step verification of crash recovery and durability |
+| 📑 [`docs/ai-review-summary.md`](docs/ai-review-summary.md) | Architectural review findings, severity ratings, and resolutions |

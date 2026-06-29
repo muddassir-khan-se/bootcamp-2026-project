@@ -1,12 +1,22 @@
-﻿from __future__ import annotations
+"""
+Carfullfy SLA Escalation Engine - Core Ticket Business Logic & DB Operations.
+Handles creation, claiming, retrieval, atomic state transitions, and SLA escalations.
+Author: Muddassir Khan | Bootcamp 2026
+"""
+
+from __future__ import annotations
 
 import sqlite3
 import uuid
 from datetime import datetime, timedelta
 from typing import List
 
-from .db import db_connection
-from .models import Ticket
+try:
+    from .db import db_connection
+    from .models import Ticket
+except ImportError:
+    from db import db_connection
+    from models import Ticket
 
 SLA_SECONDS = 60
 CREATE_TICKETS_SQL = """
@@ -81,6 +91,12 @@ def get_due_tickets() -> List[Ticket]:
             "SELECT * FROM tickets WHERE status = ? AND sla_deadline <= ?",
             ("open", now_iso),
         )
+        return [_row_to_ticket(row) for row in cursor.fetchall()]
+
+
+def get_all_tickets() -> List[Ticket]:
+    with db_connection() as conn:
+        cursor = conn.execute("SELECT * FROM tickets ORDER BY created_at DESC")
         return [_row_to_ticket(row) for row in cursor.fetchall()]
 
 

@@ -1,4 +1,10 @@
-﻿from __future__ import annotations
+"""
+Carfullfy SLA Escalation Engine - Data Models.
+Defines the Ticket dataclass and JSON serialization helpers.
+Author: Muddassir Khan | Bootcamp 2026
+"""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime

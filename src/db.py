@@ -1,4 +1,10 @@
-﻿from __future__ import annotations
+"""
+Carfullfy SLA Escalation Engine - Database Connection Layer.
+Provides SQLite connection management with WAL mode, threading locks, and environment path overrides.
+Author: Muddassir Khan | Bootcamp 2026
+"""
+
+from __future__ import annotations
 
 import os
 import sqlite3
