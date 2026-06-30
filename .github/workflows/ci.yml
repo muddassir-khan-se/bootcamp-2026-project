@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, development ]
+    branches: [ main, "muddassir-khan/*" ]
   pull_request:
-    branches: [ main, development ]
+    branches: [ main ]
 
 jobs:
   test:
