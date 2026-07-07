@@ -126,3 +126,22 @@ def test_client_connection_error():
     
     with pytest.raises(TicketServiceUnavailableError):
         client.get_all_tickets()
+
+
+def test_client_double_claim_returns_409(test_server):
+    """A second claim on an already-claimed ticket must receive HTTP 409,
+    not a silent 200 that makes the second agent think it owns the ticket."""
+    client = TicketClient(base_url=test_server)
+
+    ticket = client.create_ticket("Double-claim conflict test")
+
+    # First claim succeeds
+    claimed = client.claim_ticket(ticket.id, "agent-first")
+    assert claimed.status == "claimed"
+    assert claimed.claimed_by == "agent-first"
+
+    # Second claim must be rejected with a conflict error (HTTP 409)
+    with pytest.raises(TicketClientError) as exc_info:
+        client.claim_ticket(ticket.id, "agent-second")
+
+    assert exc_info.value.http_status == 409

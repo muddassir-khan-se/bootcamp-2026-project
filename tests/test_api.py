@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import sqlite3
 import time
@@ -44,3 +44,24 @@ def test_ticket_not_found():
 
     with pytest.raises(ValueError, match="ticket_not_found"):
         get_ticket("missing-id")
+
+
+def test_double_claim_conflict(tmp_path, monkeypatch):
+    """Second claim on an already-claimed ticket must raise TicketConflictError,
+    not silently return the other agent's data with HTTP 200."""
+    db_file = tmp_path / "tickets.db"
+    monkeypatch.setenv("TICKETS_DB_PATH", str(db_file))
+
+    from src.ticket_service import TicketConflictError, claim_ticket, create_ticket, init_ticket_table
+
+    init_ticket_table()
+    ticket = create_ticket("Conflict test ticket")
+
+    # First claim succeeds
+    claimed = claim_ticket(ticket.id, "agent-1")
+    assert claimed.status == "claimed"
+    assert claimed.claimed_by == "agent-1"
+
+    # Second claim must raise — ticket is no longer open
+    with pytest.raises(TicketConflictError):
+        claim_ticket(ticket.id, "agent-2")
