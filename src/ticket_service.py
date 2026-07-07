@@ -6,9 +6,11 @@ Author: Muddassir Khan | Bootcamp 2026
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import List
 
 try:
@@ -31,7 +33,17 @@ CREATE TABLE IF NOT EXISTS tickets (
     sla_deadline TEXT NOT NULL
 )
 """
-NOTIFY_LOG = "notify.log"
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+NOTIFY_LOG = Path(os.environ.get("NOTIFY_LOG_PATH", str(_PROJECT_ROOT / "notify.log")))
+
+
+class TicketConflictError(Exception):
+    """Raised when a claim attempt fails because the ticket is no longer open.
+
+    The exception message contains the ticket's current status so the HTTP
+    layer can include it in the 409 response body.
+    """
 
 
 def _row_to_ticket(row: sqlite3.Row) -> Ticket:
@@ -55,7 +67,7 @@ def init_ticket_table() -> None:
 
 def create_ticket(subject: str) -> Ticket:
     ticket_id = str(uuid.uuid4())
-    created_at = datetime.utcnow()
+    created_at = datetime.now(timezone.utc)
     sla_deadline = created_at + timedelta(seconds=SLA_SECONDS)
     with db_connection() as conn:
         conn.execute(
@@ -77,15 +89,25 @@ def get_ticket(ticket_id: str) -> Ticket:
 
 def claim_ticket(ticket_id: str, agent: str) -> Ticket:
     with db_connection() as conn:
-        cursor = conn.execute("UPDATE tickets SET status = ?, claimed_by = ?, claimed_at = ? WHERE id = ? AND status = ?", ("claimed", agent, datetime.utcnow().isoformat(), ticket_id, "open"))
+        cursor = conn.execute(
+            "UPDATE tickets SET status = ?, claimed_by = ?, claimed_at = ? WHERE id = ? AND status = ?",
+            ("claimed", agent, datetime.now(timezone.utc).isoformat(), ticket_id, "open"),
+        )
         conn.commit()
         if cursor.rowcount == 0:
-            return get_ticket(ticket_id)
-    return get_ticket(ticket_id)
+            # Ticket either doesn't exist or is no longer open.
+            # Read the current row using the same connection (avoids re-acquiring DB_LOCK).
+            row = conn.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
+            if not row:
+                raise ValueError("ticket_not_found")
+            raise TicketConflictError(row["status"])
+        # Fetch the updated row within the same connection.
+        row = conn.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
+        return _row_to_ticket(row)
 
 
 def get_due_tickets() -> List[Ticket]:
-    now_iso = datetime.utcnow().isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
     with db_connection() as conn:
         cursor = conn.execute(
             "SELECT * FROM tickets WHERE status = ? AND sla_deadline <= ?",
@@ -104,7 +126,7 @@ def escalate_ticket(ticket_id: str) -> Ticket:
     with db_connection() as conn:
         cursor = conn.execute(
             "UPDATE tickets SET status = ?, escalated_at = ? WHERE id = ? AND status = ?",
-            ("escalated", datetime.utcnow().isoformat(), ticket_id, "open"),
+            ("escalated", datetime.now(timezone.utc).isoformat(), ticket_id, "open"),
         )
         conn.commit()
         if cursor.rowcount == 0:

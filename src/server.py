@@ -13,10 +13,24 @@ from typing import Any
 
 try:
     from .sla_scheduler import SlaScheduler
-    from .ticket_service import claim_ticket, create_ticket, get_ticket, init_ticket_table, get_all_tickets
+    from .ticket_service import (
+        TicketConflictError,
+        claim_ticket,
+        create_ticket,
+        get_all_tickets,
+        get_ticket,
+        init_ticket_table,
+    )
 except ImportError:
     from sla_scheduler import SlaScheduler
-    from ticket_service import claim_ticket, create_ticket, get_ticket, init_ticket_table, get_all_tickets
+    from ticket_service import (
+        TicketConflictError,
+        claim_ticket,
+        create_ticket,
+        get_all_tickets,
+        get_ticket,
+        init_ticket_table,
+    )
 
 HOST = "127.0.0.1"
 PORT = 8000
@@ -42,9 +56,21 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self) -> None:
         self._set_headers(200)
 
+    def _read_body(self) -> bytes | None:
+        """Read the request body using Content-Length. Returns None on malformed header."""
+        raw = self.headers.get("Content-Length", "0")
+        try:
+            length = int(raw)
+        except ValueError:
+            self._json_response({"error": "invalid_content_length"}, 400)
+            return None
+        return self.rfile.read(length)
+
     def do_POST(self) -> None:
         if self.path == "/tickets":
-            body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            body = self._read_body()
+            if body is None:
+                return
             data = parse_json(body)
             subject = data.get("subject")
             if not subject:
@@ -57,13 +83,19 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             if len(path_parts) < 3:
                 return self._json_response({"error": "invalid_path"}, 404)
             ticket_id = path_parts[2]
-            body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            body = self._read_body()
+            if body is None:
+                return
             data = parse_json(body)
             agent = data.get("agent")
             if not agent:
                 return self._json_response({"error": "agent_required"}, 400)
             try:
                 ticket = claim_ticket(ticket_id, agent)
+            except TicketConflictError as exc:
+                return self._json_response(
+                    {"error": "ticket_not_open", "current_status": str(exc)}, 409
+                )
             except ValueError:
                 return self._json_response({"error": "ticket_not_found"}, 404)
             return self._json_response(ticket.to_dict(), 200)
