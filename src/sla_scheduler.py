@@ -7,7 +7,7 @@ Author: Muddassir Khan | Bootcamp 2026
 from __future__ import annotations
 
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 try:
@@ -30,7 +30,7 @@ class SlaScheduler(threading.Thread):
 
     def check_and_escalate(self) -> int:
         escalated = escalate_due_tickets()
-        self.last_run = datetime.utcnow()
+        self.last_run = datetime.now(timezone.utc)
         return escalated
 
     def stop(self) -> None:
