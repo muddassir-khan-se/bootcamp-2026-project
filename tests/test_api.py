@@ -39,8 +39,13 @@ def test_claim_ticket(tmp_path, monkeypatch):
     assert claimed.claimed_at is not None
 
 
-def test_ticket_not_found():
-    from src.ticket_service import get_ticket
+def test_ticket_not_found(tmp_path, monkeypatch):
+    db_file = tmp_path / "tickets.db"
+    monkeypatch.setenv("TICKETS_DB_PATH", str(db_file))
+
+    from src.ticket_service import get_ticket, init_ticket_table
+
+    init_ticket_table()
 
     with pytest.raises(ValueError, match="ticket_not_found"):
         get_ticket("missing-id")
