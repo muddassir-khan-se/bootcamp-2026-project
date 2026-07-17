@@ -1,5 +1,5 @@
 /**
- * Carfullfy SLA Escalation Engine — Client Application
+ * Carfullfy SLA Escalation Engine — Client Application (Redesigned)
  * Author: Muddassir Khan | Bootcamp 2026
  *
  * Features:
@@ -8,79 +8,68 @@
  *  - Status filter tabs (All / Open / Claimed / Escalated)
  *  - Subject search / filter
  *  - Priority selector (Low / Medium / High / Critical)
- *  - Toast notification system (replaces alert())
+ *  - Toast notification system with icons
  *  - Activity feed / audit log panel
  *  - Expandable ticket cards with full detail view
- *  - "Last refreshed" indicator
+ *  - Animated stat cards with pop on change
  *  - Keyboard shortcut: N → focus new-ticket form
- *  - Stat cards animate when counts change
  */
 
 'use strict';
 
 const API_URL = ''; // Relative to host — served by Python server
 
-// ── State ────────────────────────────────────────────────────
-let tickets       = [];       // Master list from API
-let activeFilter  = 'all';    // Current status filter
-let searchQuery   = '';       // Current search string
-let selectedPriority = 'medium'; // Currently selected priority
-let lastRefreshAt = null;     // Date of last successful fetch
-let lastStatValues = { total: 0, open: 0, claimed: 0, escalated: 0 };
+// ── State ──────────────────────────────────────────────────────
+let tickets          = [];
+let activeFilter     = 'all';
+let searchQuery      = '';
+let selectedPriority = 'medium';
+let lastRefreshAt    = null;
+let lastStatValues   = { total: 0, open: 0, claimed: 0, escalated: 0 };
 
-// ── DOM refs ─────────────────────────────────────────────────
-const ticketsContainer = document.getElementById('tickets-container');
-const createForm       = document.getElementById('create-ticket-form');
-const subjectInput     = document.getElementById('ticket-subject');
-const btnRefresh       = document.getElementById('btn-refresh');
-const refreshIcon      = document.getElementById('refresh-icon');
-const lastRefreshedEl  = document.getElementById('last-refreshed');
+// ── DOM Refs ────────────────────────────────────────────────────
+const ticketsContainer  = document.getElementById('tickets-container');
+const createForm        = document.getElementById('create-ticket-form');
+const subjectInput      = document.getElementById('ticket-subject');
+const btnRefresh        = document.getElementById('btn-refresh');
+const refreshIcon       = document.getElementById('refresh-icon');
+const lastRefreshedEl   = document.getElementById('last-refreshed');
 
-// Stats
-const valTotal     = document.getElementById('val-total');
-const valOpen      = document.getElementById('val-open');
-const valClaimed   = document.getElementById('val-claimed');
-const valEscalated = document.getElementById('val-escalated');
-const statCards    = {
+const valTotal          = document.getElementById('val-total');
+const valOpen           = document.getElementById('val-open');
+const valClaimed        = document.getElementById('val-claimed');
+const valEscalated      = document.getElementById('val-escalated');
+const statCards         = {
     total:     document.getElementById('stat-total'),
     open:      document.getElementById('stat-open'),
     claimed:   document.getElementById('stat-claimed'),
     escalated: document.getElementById('stat-escalated'),
 };
 
-// Modal
-const claimModal        = document.getElementById('claim-modal');
-const claimForm         = document.getElementById('claim-ticket-form');
+const claimModal         = document.getElementById('claim-modal');
+const claimForm          = document.getElementById('claim-ticket-form');
 const claimTicketIdInput = document.getElementById('claim-ticket-id');
-const agentNameInput    = document.getElementById('agent-name');
-const btnCancelClaim    = document.getElementById('btn-cancel-claim');
-const btnModalClose     = document.getElementById('btn-modal-close');
+const agentNameInput     = document.getElementById('agent-name');
+const btnCancelClaim     = document.getElementById('btn-cancel-claim');
+const btnModalClose      = document.getElementById('btn-modal-close');
 
-// Dark mode
-const btnDarkMode = document.getElementById('btn-dark-mode');
-const iconMoon    = document.getElementById('icon-moon');
-const iconSun     = document.getElementById('icon-sun');
+const btnDarkMode        = document.getElementById('btn-dark-mode');
+const iconMoon           = document.getElementById('icon-moon');
+const iconSun            = document.getElementById('icon-sun');
 
-// Filter & search
-const filterTabs  = document.querySelectorAll('.filter-tab');
-const searchInput = document.getElementById('search-input');
+const filterTabs         = document.querySelectorAll('.filter-tab');
+const searchInput        = document.getElementById('search-input');
 
-// Activity feed
-const activityList      = document.getElementById('activity-list');
-const btnClearActivity  = document.getElementById('btn-clear-activity');
-
-// Priority selector
-const prioritySelector  = document.getElementById('priority-selector');
-
-// Toast container
-const toastContainer    = document.getElementById('toast-container');
+const activityList       = document.getElementById('activity-list');
+const btnClearActivity   = document.getElementById('btn-clear-activity');
+const prioritySelector   = document.getElementById('priority-selector');
+const toastContainer     = document.getElementById('toast-container');
 
 
 /* =============================================================
    UTILITY HELPERS
    ============================================================= */
 
-/** XSS-safe HTML escaping */
 function escapeHTML(str) {
     if (!str) return '';
     return String(str).replace(/[&<>'"]/g,
@@ -88,20 +77,17 @@ function escapeHTML(str) {
     );
 }
 
-/** Parse ISO date string as UTC */
 function parseUTCDate(dateStr) {
     if (!dateStr) return null;
     const s = dateStr.endsWith('Z') || dateStr.includes('+') ? dateStr : dateStr + 'Z';
     return new Date(s);
 }
 
-/** Format as hh:mm:ss local time */
 function formatTime(date) {
     if (!date) return '—';
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-/** Format as relative time ago (max 60 minutes) */
 function timeAgo(date) {
     if (!date) return '';
     const diffSec = Math.round((Date.now() - date.getTime()) / 1000);
@@ -123,9 +109,9 @@ function applyTheme(dark) {
 }
 
 function initTheme() {
-    const stored = localStorage.getItem('carfullfy-theme');
+    const stored      = localStorage.getItem('carfullfy-theme');
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const dark = stored === 'dark' || (!stored && prefersDark);
+    const dark        = stored === 'dark' || (!stored && prefersDark);
     applyTheme(dark);
 }
 
@@ -141,32 +127,24 @@ btnDarkMode.addEventListener('click', () => {
    TOAST NOTIFICATIONS
    ============================================================= */
 
-/**
- * Show a toast notification.
- * @param {'success'|'error'|'info'|'warning'} type
- * @param {string} title
- * @param {string} [message]
- * @param {number} [duration=4000] ms
- */
-function showToast(type, title, message = '', duration = 4000) {
-    const icons = {
-        success: `<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`,
-        error:   `<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
-        info:    `<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`,
-        warning: `<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
-    };
+const TOAST_ICONS = {
+    success: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`,
+    error:   `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
+    info:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`,
+    warning: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
+};
 
+function showToast(type, title, message = '', duration = 4000) {
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    toast.style.setProperty('--toast-duration', `${duration}ms`);
     toast.innerHTML = `
-        ${icons[type] || icons.info}
+        <div class="toast-icon">${TOAST_ICONS[type] || TOAST_ICONS.info}</div>
         <div class="toast-body">
             <div class="toast-title">${escapeHTML(title)}</div>
-            ${message ? `<div class="toast-message">${escapeHTML(message)}</div>` : ''}
+            ${message ? `<div class="toast-msg">${escapeHTML(message)}</div>` : ''}
         </div>
-        <button class="toast-close" aria-label="Dismiss notification">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <button class="toast-close" aria-label="Dismiss">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
             </svg>
         </button>
@@ -175,8 +153,8 @@ function showToast(type, title, message = '', duration = 4000) {
     toastContainer.appendChild(toast);
 
     const dismiss = () => {
-        toast.classList.add('leaving');
-        setTimeout(() => toast.remove(), 280);
+        toast.classList.add('fade-out');
+        setTimeout(() => toast.remove(), 300);
     };
 
     toast.querySelector('.toast-close').addEventListener('click', dismiss);
@@ -190,17 +168,10 @@ function showToast(type, title, message = '', duration = 4000) {
 
 const activityLog = [];
 
-/**
- * Add an event to the activity feed.
- * @param {'created'|'claimed'|'escalated'} type
- * @param {string} subject  - ticket subject (truncated)
- * @param {string} [detail] - extra context (e.g. agent name)
- */
 function logActivity(type, subject, detail = '') {
     const now = new Date();
     activityLog.unshift({ type, subject, detail, time: now });
 
-    // Remove empty state
     const emptyEl = activityList.querySelector('.activity-empty');
     if (emptyEl) emptyEl.remove();
 
@@ -212,19 +183,18 @@ function logActivity(type, subject, detail = '') {
     li.innerHTML = `
         <span class="activity-dot ${type}"></span>
         <div style="flex:1;min-width:0">
-            <div class="activity-text">
-                <strong>${escapeHTML(labels[type] || type)}</strong>${detailText}
-                <div style="color:var(--text-muted);margin-top:0.1rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-                    ${escapeHTML(subject.length > 42 ? subject.substring(0, 42) + '…' : subject)}
-                </div>
+            <div style="font-size:0.73rem;color:var(--text-primary);font-weight:600;line-height:1.3">
+                ${escapeHTML(labels[type] || type)}${detailText}
             </div>
-            <div class="activity-time">${formatTime(now)}</div>
+            <div style="font-size:0.68rem;color:var(--text-muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                ${escapeHTML(subject.length > 40 ? subject.substring(0, 40) + '…' : subject)}
+            </div>
         </div>
+        <span class="activity-time">${formatTime(now)}</span>
     `;
 
     activityList.insertBefore(li, activityList.firstChild);
 
-    // Keep max 30 items in DOM
     const items = activityList.querySelectorAll('.activity-item');
     if (items.length > 30) items[items.length - 1].remove();
 }
@@ -247,10 +217,9 @@ function updateStats(newStats) {
         const val = newStats[key];
         if (val !== lastStatValues[key]) {
             els[key].textContent = val;
-            // Trigger pop animation
             const card = statCards[key];
             card.classList.remove('pop');
-            void card.offsetWidth; // reflow to restart animation
+            void card.offsetWidth;
             card.classList.add('pop');
             setTimeout(() => card.classList.remove('pop'), 450);
         }
@@ -264,7 +233,6 @@ function updateStats(newStats) {
    FILTER & SEARCH
    ============================================================= */
 
-// Filter tabs
 filterTabs.forEach(tab => {
     tab.addEventListener('click', () => {
         filterTabs.forEach(t => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
@@ -275,7 +243,6 @@ filterTabs.forEach(tab => {
     });
 });
 
-// Search
 searchInput.addEventListener('input', () => {
     searchQuery = searchInput.value.trim().toLowerCase();
     renderTickets();
@@ -313,7 +280,6 @@ prioritySelector.querySelectorAll('.priority-btn').forEach(btn => {
    FETCH TICKETS
    ============================================================= */
 
-// Track previously-seen IDs for activity log diffing
 const seenTicketIds = new Set();
 const prevStatuses  = {};
 
@@ -324,12 +290,10 @@ async function fetchTickets() {
 
         const data = await response.json();
 
-        // Detect new & status-changed tickets for activity log
         data.forEach(t => {
             if (!seenTicketIds.has(t.id)) {
                 seenTicketIds.add(t.id);
                 if (tickets.length > 0) {
-                    // Only log if app is already initialised (avoid flood on first load)
                     logActivity('created', t.subject);
                 }
             } else if (prevStatuses[t.id] && prevStatuses[t.id] !== t.status) {
@@ -339,7 +303,6 @@ async function fetchTickets() {
             prevStatuses[t.id] = t.status;
         });
 
-        // On first load, seed seenIds & prevStatuses without logging
         if (tickets.length === 0 && data.length > 0) {
             data.forEach(t => seenTicketIds.add(t.id));
         }
@@ -347,7 +310,6 @@ async function fetchTickets() {
         tickets = data;
         lastRefreshAt = new Date();
 
-        // Compute stats
         const stats = {
             total:     tickets.length,
             open:      tickets.filter(t => t.status === 'open').length,
@@ -375,11 +337,18 @@ function updateLastRefreshed() {
    RENDER TICKETS
    ============================================================= */
 
+function getStatusIcon(status) {
+    if (status === 'open')      return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
+    if (status === 'claimed')   return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
+    if (status === 'escalated') return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
+    return '';
+}
+
 function showErrorState() {
     ticketsContainer.innerHTML = `
         <div class="empty-state">
-            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            <h3>Connection Failed</h3>
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="var(--rose)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <p style="font-weight:700;color:var(--text-primary);font-size:0.9rem">Connection Failed</p>
             <p>Could not reach the API. Make sure the Python server is running at <strong>http://127.0.0.1:8000</strong></p>
         </div>
     `;
@@ -394,15 +363,15 @@ function renderTickets() {
         const isFilter = activeFilter !== 'all';
         ticketsContainer.innerHTML = `
             <div class="empty-state">
-                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-                <h3>${isSearch || isFilter ? 'No matching tickets' : 'No Support Tickets'}</h3>
-                <p>${isSearch ? `No results for "${searchQuery}".` : isFilter ? `No ${activeFilter} tickets right now.` : 'Submit a new query using the form to begin SLA monitoring.'}</p>
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.4"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <p style="font-weight:600;color:var(--text-secondary)">${isSearch || isFilter ? 'No matching tickets' : 'No Support Tickets'}</p>
+                <p>${isSearch ? `No results for "${escapeHTML(searchQuery)}".` : isFilter ? `No ${activeFilter} tickets right now.` : 'Submit a new query using the form to begin SLA monitoring.'}</p>
             </div>
         `;
         return;
     }
 
-    // Remember which cards are expanded
+    // Remember expanded cards
     const expandedIds = new Set(
         [...ticketsContainer.querySelectorAll('.ticket-card.expanded')]
             .map(el => el.getAttribute('data-id'))
@@ -410,12 +379,12 @@ function renderTickets() {
 
     ticketsContainer.innerHTML = '';
 
-    filtered.forEach(ticket => {
+    filtered.forEach((ticket, idx) => {
         const card = document.createElement('div');
         card.className = `ticket-card status-${ticket.status}`;
         card.setAttribute('data-id', ticket.id);
         card.setAttribute('role', 'article');
-        card.setAttribute('aria-label', `Ticket: ${ticket.subject}`);
+        card.style.animationDelay = `${idx * 40}ms`;
 
         const isExpanded = expandedIds.has(ticket.id);
         if (isExpanded) card.classList.add('expanded');
@@ -425,153 +394,144 @@ function renderTickets() {
         const claimedDate   = parseUTCDate(ticket.claimed_at);
         const escalatedDate = parseUTCDate(ticket.escalated_at);
 
-        // ── Badge HTML ───────────────────────────────────────
         const priorityLabel = ticket.priority || 'medium';
-        const priorityBadgeHtml = `<span class="priority-badge ${priorityLabel}">${priorityLabel}</span>`;
 
-        let statusBadgeHtml = '';
-        if (ticket.status === 'open')      statusBadgeHtml = `<span class="badge badge-open">Open</span>`;
-        else if (ticket.status === 'claimed')   statusBadgeHtml = `<span class="badge badge-claimed">Claimed</span>`;
-        else if (ticket.status === 'escalated') statusBadgeHtml = `<span class="badge badge-escalated">Escalated</span>`;
-
-        // ── SLA progress HTML ────────────────────────────────
-        let slaHtml = '';
+        // ── Build SLA section ────────────────────────────────
+        let slaSection = '';
         if (ticket.status === 'open') {
-            slaHtml = `
-                <div class="sla-progress-container">
-                    <div class="sla-header">
+            slaSection = `
+                <div class="sla-bar-wrap">
+                    <div class="sla-bar-label">
                         <span>SLA Countdown</span>
-                        <span class="sla-countdown-timer" id="timer-${ticket.id}">Calculating…</span>
+                        <span class="sla-time" id="timer-${ticket.id}">Calculating…</span>
                     </div>
-                    <div class="sla-progress-bar">
-                        <div class="sla-progress-fill green" id="bar-${ticket.id}" style="width:100%"></div>
+                    <div class="sla-bar-track">
+                        <div class="sla-bar-fill safe" id="bar-${ticket.id}" style="width:100%"></div>
                     </div>
-                    <div class="sla-deadline-abs">Deadline: ${formatTime(deadlineDate)}</div>
                 </div>
             `;
         } else if (ticket.status === 'claimed') {
-            let claimedText = `Claimed by <strong>${escapeHTML(ticket.claimed_by || '—')}</strong>`;
+            let diffText = '';
             if (claimedDate && createdDate) {
                 const diffSec = Math.round((claimedDate - createdDate) / 1000);
-                claimedText += ` in ${diffSec}s`;
+                diffText = ` in ${diffSec}s`;
             }
-            slaHtml = `
-                <div class="sla-progress-container">
-                    <div class="sla-header">
-                        <span>Claim Details</span>
-                        <span style="color:var(--claimed)">✓ Resolved</span>
+            slaSection = `
+                <div class="ticket-resolved-banner">
+                    <div class="banner-bar"></div>
+                    <div class="banner-label">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                        Claim Details
                     </div>
-                    <div class="sla-progress-bar">
-                        <div class="sla-progress-fill" style="width:100%;background:var(--claimed)"></div>
-                    </div>
-                    <div class="sla-deadline-abs">${claimedText} at ${formatTime(claimedDate)}</div>
+                    <div class="banner-detail">Claimed by <strong>${escapeHTML(ticket.claimed_by || '—')}</strong>${diffText} at ${formatTime(claimedDate)}</div>
                 </div>
             `;
         } else if (ticket.status === 'escalated') {
-            slaHtml = `
-                <div class="sla-progress-container">
-                    <div class="sla-header" style="color:var(--escalated)">
-                        <span>⚠ SLA Breached</span>
-                        <span>Escalated</span>
+            slaSection = `
+                <div class="ticket-escalated-banner">
+                    <div class="banner-bar"></div>
+                    <div class="banner-label">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        SLA Breached — Escalated to Management
                     </div>
-                    <div class="sla-progress-bar">
-                        <div class="sla-progress-fill red" style="width:100%"></div>
-                    </div>
-                    <div class="sla-deadline-abs" style="color:var(--escalated)">Escalated to management at ${formatTime(escalatedDate)}</div>
+                    <div class="banner-detail">Escalated at ${formatTime(escalatedDate)}</div>
                 </div>
             `;
         }
 
-        // ── Claim button ─────────────────────────────────────
-        const actionHtml = ticket.status === 'open' ? `
-            <div class="ticket-actions">
+        // ── Build action row ─────────────────────────────────
+        const actionRow = ticket.status === 'open' ? `
+            <div class="ticket-action-row">
                 <button class="btn-claim" data-id="${ticket.id}" aria-label="Claim ticket: ${escapeHTML(ticket.subject)}">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                     Claim Ticket
                 </button>
+                <span class="ticket-expand-hint">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="chevron-${ticket.id}" style="transition:transform 0.2s ease${isExpanded ? ';transform:rotate(180deg)' : ''}"><polyline points="6 9 12 15 18 9"/></svg>
+                    <span id="expand-label-${ticket.id}">${isExpanded ? 'Collapse' : 'Expand'}</span>
+                </span>
             </div>
-        ` : '';
+        ` : `
+            <div class="ticket-action-row">
+                <span></span>
+                <span class="ticket-expand-hint">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="chevron-${ticket.id}" style="transition:transform 0.2s ease${isExpanded ? ';transform:rotate(180deg)' : ''}"><polyline points="6 9 12 15 18 9"/></svg>
+                    <span id="expand-label-${ticket.id}">${isExpanded ? 'Collapse' : 'Expand'}</span>
+                </span>
+            </div>
+        `;
 
-        // ── Expanded detail view ──────────────────────────────
-        const detailsHtml = `
-            <div class="ticket-details">
-                <div class="ticket-details-grid">
-                    <div class="detail-item">
-                        <span class="detail-label">Full UUID</span>
-                        <span class="detail-value mono" title="Click to copy" onclick="navigator.clipboard.writeText('${ticket.id}').then(()=>showToast('info','Copied!','UUID copied to clipboard',2000))" style="cursor:pointer">${escapeHTML(ticket.id)}</span>
+        // ── Build expanded detail ────────────────────────────
+        const detailDrawer = `
+            <div class="ticket-detail" style="display:${isExpanded ? 'flex' : 'none'};flex-direction:column;gap:4px" id="detail-${ticket.id}">
+                <dl style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <div>
+                        <dt>Full UUID</dt>
+                        <dd style="font-family:'Courier New',monospace;font-size:0.68rem;cursor:pointer;color:var(--blue)"
+                            title="Click to copy"
+                            onclick="navigator.clipboard.writeText('${ticket.id}').then(()=>showToast('info','Copied!','UUID copied to clipboard',2000))">
+                            ${escapeHTML(ticket.id)}
+                        </dd>
                     </div>
-                    <div class="detail-item">
-                        <span class="detail-label">Status</span>
-                        <span class="detail-value" style="text-transform:capitalize">${escapeHTML(ticket.status)}</span>
+                    <div>
+                        <dt>Priority</dt>
+                        <dd style="text-transform:capitalize">${escapeHTML(priorityLabel)}</dd>
                     </div>
-                    <div class="detail-item">
-                        <span class="detail-label">Created At</span>
-                        <span class="detail-value">${formatTime(createdDate)}</span>
+                    <div>
+                        <dt>Created At</dt>
+                        <dd>${formatTime(createdDate)}</dd>
                     </div>
-                    <div class="detail-item">
-                        <span class="detail-label">SLA Deadline</span>
-                        <span class="detail-value">${formatTime(deadlineDate)}</span>
+                    <div>
+                        <dt>SLA Deadline</dt>
+                        <dd>${formatTime(deadlineDate)}</dd>
                     </div>
                     ${ticket.claimed_by ? `
-                    <div class="detail-item">
-                        <span class="detail-label">Claimed By</span>
-                        <span class="detail-value">${escapeHTML(ticket.claimed_by)}</span>
+                    <div>
+                        <dt>Claimed By</dt>
+                        <dd>${escapeHTML(ticket.claimed_by)}</dd>
                     </div>
-                    <div class="detail-item">
-                        <span class="detail-label">Claimed At</span>
-                        <span class="detail-value">${formatTime(claimedDate)}</span>
+                    <div>
+                        <dt>Claimed At</dt>
+                        <dd>${formatTime(claimedDate)}</dd>
                     </div>
                     ` : ''}
                     ${ticket.escalated_at ? `
-                    <div class="detail-item">
-                        <span class="detail-label">Escalated At</span>
-                        <span class="detail-value" style="color:var(--escalated)">${formatTime(escalatedDate)}</span>
+                    <div style="grid-column:span 2">
+                        <dt>Escalated At</dt>
+                        <dd style="color:var(--rose)">${formatTime(escalatedDate)}</dd>
                     </div>
                     ` : ''}
-                    <div class="detail-item">
-                        <span class="detail-label">Priority</span>
-                        <span class="detail-value" style="text-transform:capitalize">${priorityLabel}</span>
-                    </div>
-                </div>
+                </dl>
             </div>
         `;
 
-        // ── Assemble card ─────────────────────────────────────
+        // ── Assemble card ────────────────────────────────────
         card.innerHTML = `
             <div class="ticket-top">
-                <div class="ticket-title">${escapeHTML(ticket.subject)}</div>
+                <div class="ticket-status-icon ${ticket.status}">${getStatusIcon(ticket.status)}</div>
+                <div class="ticket-main">
+                    <div class="ticket-subject">${escapeHTML(ticket.subject)}</div>
+                    <div class="ticket-meta">
+                        <span class="ticket-id-badge"
+                            title="Click to copy UUID"
+                            onclick="event.stopPropagation();navigator.clipboard.writeText('${ticket.id}').then(()=>showToast('info','Copied!','UUID copied to clipboard',2000))">
+                            ${ticket.id.substring(0, 8)}…
+                        </span>
+                        <span class="ticket-time">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            ${formatTime(createdDate)}
+                        </span>
+                    </div>
+                </div>
                 <div class="ticket-badges">
-                    ${priorityBadgeHtml}
-                    ${statusBadgeHtml}
+                    <span class="badge badge-priority ${priorityLabel}">${priorityLabel}</span>
+                    <span class="badge badge-status ${ticket.status}">${ticket.status}</span>
                 </div>
             </div>
-
-            <div class="ticket-meta">
-                <div class="meta-item">
-                    <span class="ticket-id-badge" title="Click to copy UUID" onclick="event.stopPropagation();navigator.clipboard.writeText('${ticket.id}').then(()=>showToast('info','Copied!','UUID copied to clipboard',2000))">
-                        ${ticket.id.substring(0, 8)}…
-                    </span>
-                </div>
-                <div class="meta-item">
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                    <span>${formatTime(createdDate)}</span>
-                </div>
-            </div>
-
-            ${slaHtml}
-            ${actionHtml}
-            ${detailsHtml}
-            <div class="expand-hint">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="chevron-${ticket.id}"><polyline points="6 9 12 15 18 9"/></svg>
-                <span id="expand-label-${ticket.id}">${isExpanded ? 'Click to collapse' : 'Click to expand'}</span>
-            </div>
+            ${slaSection}
+            ${actionRow}
+            ${detailDrawer}
         `;
-
-        // Update chevron direction for expanded cards
-        if (isExpanded) {
-            const chevron = card.querySelector(`#chevron-${ticket.id}`);
-            if (chevron) chevron.style.transform = 'rotate(180deg)';
-        }
 
         ticketsContainer.appendChild(card);
     });
@@ -587,19 +547,18 @@ function renderTickets() {
     // Wire up card expand/collapse
     ticketsContainer.querySelectorAll('.ticket-card').forEach(card => {
         card.addEventListener('click', e => {
-            // Don't expand if clicking a button or the id badge
-            if (e.target.closest('button') || e.target.closest('.ticket-id-badge')) return;
-            const wasExpanded = card.classList.contains('expanded');
-            card.classList.toggle('expanded');
-            const id = card.getAttribute('data-id');
-            const chevron = card.querySelector(`#chevron-${id}`);
-            const label   = card.querySelector(`#expand-label-${id}`);
-            if (chevron) chevron.style.transform = wasExpanded ? '' : 'rotate(180deg)';
-            if (label)   label.textContent = wasExpanded ? 'Click to expand' : 'Click to collapse';
+            if (e.target.closest('button') || e.target.closest('.ticket-id-badge') || e.target.closest('dd[onclick]')) return;
+            const id       = card.getAttribute('data-id');
+            const detail   = document.getElementById(`detail-${id}`);
+            const chevron  = document.getElementById(`chevron-${id}`);
+            const label    = document.getElementById(`expand-label-${id}`);
+            const expanded = card.classList.toggle('expanded');
+            if (detail)  detail.style.display = expanded ? 'flex' : 'none';
+            if (chevron) chevron.style.transform = expanded ? 'rotate(180deg)' : '';
+            if (label)   label.textContent = expanded ? 'Collapse' : 'Expand';
         });
     });
 
-    // Immediately update SLA timers
     updateActiveTimers();
 }
 
@@ -627,24 +586,24 @@ function updateActiveTimers() {
         const remainSec   = Math.ceil(remainingMs / 1000);
 
         if (remainSec <= 0) {
-            timerEl.textContent      = 'Breaching SLA…';
-            timerEl.style.color      = 'var(--escalated)';
-            barEl.style.width        = '0%';
-            barEl.className          = 'sla-progress-fill red';
+            timerEl.textContent = 'Breaching SLA…';
+            timerEl.className   = 'sla-time critical';
+            barEl.style.width   = '100%';
+            barEl.className     = 'sla-bar-fill breached';
         } else {
             timerEl.textContent = `${remainSec}s remaining`;
             const pct = Math.max(0, Math.min(100, (remainingMs / totalMs) * 100));
             barEl.style.width = `${pct}%`;
 
             if (remainSec > 30) {
-                timerEl.style.color = 'var(--text-muted)';
-                barEl.className     = 'sla-progress-fill green';
+                timerEl.className = 'sla-time';
+                barEl.className   = 'sla-bar-fill safe';
             } else if (remainSec > 10) {
-                timerEl.style.color = 'var(--open)';
-                barEl.className     = 'sla-progress-fill orange';
+                timerEl.className = 'sla-time urgent';
+                barEl.className   = 'sla-bar-fill warning';
             } else {
-                timerEl.style.color = 'var(--escalated)';
-                barEl.className     = 'sla-progress-fill red';
+                timerEl.className = 'sla-time critical';
+                barEl.className   = 'sla-bar-fill danger';
             }
         }
     });
@@ -673,7 +632,6 @@ createForm.addEventListener('submit', async e => {
         });
 
         if (res.ok) {
-            const ticket = await res.json();
             subjectInput.value = '';
             showToast('success', 'Ticket Created', `"${subject.substring(0, 40)}" — SLA timer started.`);
             logActivity('created', subject);
@@ -709,13 +667,7 @@ function closeClaimModal() {
 
 btnCancelClaim.addEventListener('click', closeClaimModal);
 btnModalClose.addEventListener('click', closeClaimModal);
-
-// Close on backdrop click
-claimModal.addEventListener('click', e => {
-    if (e.target === claimModal) closeClaimModal();
-});
-
-// Close on Escape
+claimModal.addEventListener('click', e => { if (e.target === claimModal) closeClaimModal(); });
 document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && claimModal.classList.contains('active')) closeClaimModal();
 });
@@ -756,23 +708,22 @@ claimForm.addEventListener('submit', async e => {
 
 
 /* =============================================================
-   MANUAL REFRESH BUTTON
+   REFRESH BUTTON
    ============================================================= */
 
 btnRefresh.addEventListener('click', () => {
-    refreshIcon.classList.add('spin-animation');
+    refreshIcon.style.animation = 'spin 0.8s linear infinite';
     fetchTickets().then(() => {
-        setTimeout(() => refreshIcon.classList.remove('spin-animation'), 800);
+        setTimeout(() => { refreshIcon.style.animation = ''; }, 800);
     });
 });
 
 
 /* =============================================================
-   KEYBOARD SHORTCUT — N to focus new ticket form
+   KEYBOARD SHORTCUT — N to focus new ticket input
    ============================================================= */
 
 document.addEventListener('keydown', e => {
-    // Don't intercept if user is typing in an input/textarea
     const tag = e.target.tagName.toLowerCase();
     if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
     if (e.key === 'n' || e.key === 'N') {
@@ -784,7 +735,7 @@ document.addEventListener('keydown', e => {
 
 
 /* =============================================================
-   LAST REFRESHED INDICATOR
+   LAST REFRESHED INDICATOR UPDATER
    ============================================================= */
 
 setInterval(() => {
