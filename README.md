@@ -69,9 +69,11 @@ bootcamp-2026-project/
 │   ├── __init__.py                 # Python package initialization
 │   ├── db.py                       # Central SQLite connection layer (WAL mode & thread safety)
 │   ├── models.py                   # Data models (Ticket dataclass & JSON serializers)
-│   ├── ticket_service.py           # Core business logic (creation, claiming, escalation)
-│   ├── sla_scheduler.py            # Background daemon thread & crash recovery manager
-│   ├── server.py                   # HTTP web server (REST API endpoints & static asset router)
+│   ├── ticket_service.py           # Core DB operations (creation, claiming, escalation)
+│   ├── temporal_activities.py      # Temporal Activities wrapping ticket_service functions
+│   ├── temporal_workflow.py        # SlaWorkflow — durable 60-second SLA timer via Temporal
+│   ├── worker.py                   # Temporal Worker process (registers workflow + activities)
+│   ├── server.py                   # HTTP web server — starts workflows via Temporal Client
 │   ├── client.py                   # Programmatic Python HTTP client SDK
 │   └── static/                     # Frontend Web Dashboard Assets
 │       ├── index.html              # Dashboard HTML shell with SEO meta tags & layout panels
@@ -79,9 +81,10 @@ bootcamp-2026-project/
 │       └── app.js                  # Client-side JavaScript (polling, SLA timers, toast UI)
 │
 ├── tests/                          # Automated Testing Suite
-│   ├── test_api.py                 # REST API endpoint verification
-│   ├── test_client.py              # Python HTTP client integration tests
-│   └── test_sla_scheduler.py       # Background scheduler & escalation logic tests
+│   ├── test_api.py                 # Direct ticket_service function tests
+│   ├── test_client.py              # Python HTTP client integration tests (Temporal mocked)
+│   ├── test_temporal_activities.py # Temporal Activities unit tests
+│   └── test_sla_scheduler.py       # Placeholder (scheduler replaced by Temporal)
 │
 ├── docs/                           # Comprehensive System Documentation
 │   ├── architecture.md             # In-depth system architecture, data models & flow diagrams
@@ -92,7 +95,7 @@ bootcamp-2026-project/
 │   └── ci.yml                      # GitHub Actions automated test workflow
 │
 ├── README.md                       # Master project document
-├── requirements.txt                # Python dependencies
+├── requirements.txt                # Python dependencies (pytest, temporalio)
 ├── tickets.db                      # Primary SQLite database file (created automatically)
 └── notify.log                      # Audit log for manager escalation notifications
 ```
@@ -104,6 +107,7 @@ bootcamp-2026-project/
 ### Requirements
 - **Python 3.10** or higher
 - `pip` package manager
+- **Temporal CLI** — for running the Temporal dev server (download from [temporal.io](https://docs.temporal.io/cli))
 
 ### Installation Steps
 
@@ -122,21 +126,41 @@ bootcamp-2026-project/
 
 ## Running the Service
 
-Start the ticket engine server, background scheduler, and web dashboard with a single command:
+After migrating to Temporal, the service requires **three processes** running simultaneously.
 
+### Step 1 — Start the Temporal Dev Server
+```bash
+temporal server start-dev
+```
+This starts Temporal on `localhost:7233` and the Temporal Web UI at `http://localhost:8233`.  
+Keep this terminal open.
+
+### Step 2 — Start the Temporal Worker
+```bash
+py src/worker.py
+```
+The worker registers `SlaWorkflow` and all activities on the `sla-ticket-queue`.  
+Keep this terminal open.
+
+### Step 3 — Start the HTTP API Server
 ```bash
 py src/server.py
 ```
+The HTTP server listens on **`http://127.0.0.1:8000`** and connects to Temporal to start/signal workflows.
 
-By default, the HTTP server listens on **`http://127.0.0.1:8000`**.
-
-### Custom Database Configuration
-You can customize the SQLite database storage path using the `TICKETS_DB_PATH` environment variable:
-
-```powershell
-# Windows PowerShell
-$env:TICKETS_DB_PATH = "C:\custom\path\tickets.db"
-py src/server.py
+### Architecture Flow
+```
+HTTP Client (browser / curl)
+        ↓
+  src/server.py  (HTTP API — port 8000)
+        ↓
+  Temporal Client  →  Temporal Server (port 7233)
+        ↓
+  SlaWorkflow  (one instance per ticket)
+        ↓
+  Activities  (save_ticket, escalate_ticket, notify_manager, claim_ticket)
+        ↓
+  SQLite Database (tickets.db)
 ```
 
 ---
@@ -287,13 +311,26 @@ Centralized connection manager utilizing Python's `contextmanager`. Configures S
 Defines the `Ticket` dataclass containing typed attributes for ticket identifiers, subjects, status states, agent assignments, and ISO timestamp helper methods (`to_dict()`).
 
 ### 3. Service Layer (`src/ticket_service.py`)
-Encapsulates all core domain logic. Contains SQL query executions for creating tickets, querying due tickets, updating statuses atomically (`WHERE status = 'open'`), and writing escalation audit notices to `notify.log`.
+Encapsulates all core domain DB operations. Contains SQL query executions for creating tickets, querying tickets by ID, updating statuses atomically (`WHERE status = 'open'`), and writing escalation audit notices to `notify.log`. These functions are now called exclusively from **Temporal Activities**.
 
-### 4. SLA Background Scheduler (`src/sla_scheduler.py`)
-Extends `threading.Thread` as a daemon process. Executes periodic checks every 5 seconds to escalate overdue tickets. Crucially, it triggers an immediate recovery check upon initialization to process tickets that expired during server downtime.
+### 4. Temporal Activities (`src/temporal_activities.py`)
+Four `@activity.defn` functions that wrap the ticket service DB operations for use inside the Temporal workflow:
+- `save_ticket_activity` — inserts a ticket row using a pre-assigned UUID
+- `claim_ticket_activity` — marks a ticket as claimed by an agent
+- `escalate_ticket_activity` — atomically escalates an overdue open ticket
+- `notify_manager_activity` — writes to the `notify.log` audit file
 
-### 5. HTTP Web Server (`src/server.py`)
-Built on Python's native `http.server.HTTPServer` and `BaseHTTPRequestHandler`. Translates incoming HTTP requests into service function calls and serves frontend static assets (`index.html`, `style.css`, `app.js`) with proper MIME types and CORS headers.
+### 5. SLA Workflow (`src/temporal_workflow.py`)
+The `SlaWorkflow` class defines the complete ticket lifecycle as a **durable Temporal workflow**. A single instance runs per ticket (workflow ID = ticket UUID). The 60-second SLA window is enforced by `workflow.wait_condition(timeout=60s)` — a crash-proof durable timer. A `claim_signal` received before the timeout cancels the escalation path.
+
+### 6. Temporal Worker (`src/worker.py`)
+Connects to the Temporal server and starts a worker that listens on the `sla-ticket-queue`, executing `SlaWorkflow` and its four activities.
+
+### 7. HTTP Web Server (`src/server.py`)
+Built on Python's native `http.server.HTTPServer`. Uses a background asyncio event loop thread to bridge synchronous HTTP handler calls to the async Temporal SDK:
+- `POST /tickets` → generates a UUID → starts `SlaWorkflow` via Temporal Client
+- `POST /tickets/{id}/claim` → sends `claim_signal` to the running workflow
+- `GET /tickets`, `GET /tickets/{id}` → reads directly from SQLite
 
 ---
 

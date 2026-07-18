@@ -16,3 +16,6 @@
 [notify_manager] Ticket 411ee1db-0d7a-47f8-aaa5-5ae36ccee347 breached SLA at 2026-06-29T04:38:19.170517
 [notify_manager] Ticket e3c4e34a-e830-4323-89cb-ade0665862ee breached SLA at 2026-06-29T04:38:19.326856
 [notify_manager] Ticket 9274d329-7a55-4f1a-bdfe-81abe6ae402a breached SLA at 2026-06-29T07:09:24.351330
+[notify_manager] Ticket test-id-123 breached SLA at 2026-07-17T12:00:00+00:00
+[notify_manager] Ticket 53e5b616-83c2-4876-97c8-d92b8a8164ec breached SLA at 2026-07-18T06:04:20.494623+00:00
+[notify_manager] Ticket 6d7fa8ee-6787-44a2-8683-ef13a851cdcc breached SLA at 2026-07-18T06:05:53.916365+00:00
