@@ -278,16 +278,23 @@ def run_server() -> None:
     loop_thread = threading.Thread(target=_start_event_loop, daemon=True)
     loop_thread.start()
 
+    # Wait for the background loop to be fully initialized.
+    import time as _time
+    for _ in range(50):
+        if _loop is not None:
+            break
+        _time.sleep(0.05)
+
     # Pre-connect to Temporal so the first request is fast.
     try:
         get_temporal_client()
-        print("✓ Connected to Temporal server.")
+        print("Connected to Temporal server.")
     except Exception as exc:
-        print(f"⚠ WARNING: Could not connect to Temporal ({exc})")
+        print(f"WARNING: Could not connect to Temporal ({exc})")
         print("  Make sure 'temporal server start-dev' is running before sending requests.")
 
     server = HTTPServer((HOST, PORT), TicketRequestHandler)
-    print(f"✓ HTTP server running at http://{HOST}:{PORT}")
+    print(f"HTTP server running at http://{HOST}:{PORT}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
