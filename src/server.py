@@ -1,32 +1,37 @@
 """
 Carfullfy SLA Escalation Engine - HTTP Server & Static Asset Router.
 Provides REST API endpoints for ticket lifecycle management and serves the frontend dashboard.
+
+Workflow logic is now driven by Temporal:
+  POST /tickets          → generates UUID, starts SlaWorkflow, returns ticket from DB
+  POST /tickets/*/claim  → sends claim_signal to the running workflow
+
 Author: Muddassir Khan | Bootcamp 2026
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
+import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
+
+from temporalio.client import Client, WorkflowHandle
+from temporalio.service import RPCError
 
 try:
-    from .sla_scheduler import SlaScheduler
+    from .temporal_workflow import SlaWorkflow, TASK_QUEUE, TicketWorkflowInput
     from .ticket_service import (
-        TicketConflictError,
-        claim_ticket,
-        create_ticket,
         get_all_tickets,
         get_ticket,
         init_ticket_table,
     )
 except ImportError:
-    from sla_scheduler import SlaScheduler
+    from temporal_workflow import SlaWorkflow, TASK_QUEUE, TicketWorkflowInput
     from ticket_service import (
-        TicketConflictError,
-        claim_ticket,
-        create_ticket,
         get_all_tickets,
         get_ticket,
         init_ticket_table,
@@ -34,7 +39,45 @@ except ImportError:
 
 HOST = "127.0.0.1"
 PORT = 8000
+TEMPORAL_HOST = "localhost:7233"
 
+# ---------------------------------------------------------------------------
+# Async event loop running in a background daemon thread.
+# Bridges the synchronous HTTP handler to the async Temporal SDK.
+# ---------------------------------------------------------------------------
+
+_loop: Optional[asyncio.AbstractEventLoop] = None
+_temporal_client: Optional[Client] = None
+
+
+def _start_event_loop() -> None:
+    global _loop
+    _loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(_loop)
+    _loop.run_forever()
+
+
+def _run_async(coro) -> Any:
+    """Submit a coroutine to the background event loop and block until done."""
+    assert _loop is not None, "Event loop not started"
+    future = asyncio.run_coroutine_threadsafe(coro, _loop)
+    return future.result(timeout=30)
+
+
+async def _connect_client() -> Client:
+    global _temporal_client
+    if _temporal_client is None:
+        _temporal_client = await Client.connect(TEMPORAL_HOST)
+    return _temporal_client
+
+
+def get_temporal_client() -> Client:
+    return _run_async(_connect_client())
+
+
+# ---------------------------------------------------------------------------
+# HTTP Request Handler
+# ---------------------------------------------------------------------------
 
 def parse_json(body: bytes) -> dict[str, Any]:
     return json.loads(body.decode("utf-8")) if body else {}
@@ -67,6 +110,7 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
         return self.rfile.read(length)
 
     def do_POST(self) -> None:
+        # ── POST /tickets ──────────────────────────────────────────────────
         if self.path == "/tickets":
             body = self._read_body()
             if body is None:
@@ -75,9 +119,38 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             subject = data.get("subject")
             if not subject:
                 return self._json_response({"error": "subject_required"}, 400)
-            ticket = create_ticket(subject)
-            return self._json_response(ticket.to_dict(), 201)
 
+            # Generate ticket UUID here so the workflow ID = ticket UUID.
+            # This lets us signal the workflow later using the same ID.
+            ticket_id = str(uuid.uuid4())
+
+            try:
+                client = get_temporal_client()
+                _run_async(
+                    client.start_workflow(
+                        SlaWorkflow.run,
+                        TicketWorkflowInput(ticket_id=ticket_id, subject=subject),
+                        id=ticket_id,
+                        task_queue=TASK_QUEUE,
+                    )
+                )
+            except Exception as exc:
+                return self._json_response({"error": f"temporal_error: {exc}"}, 503)
+
+            # The first activity (save_ticket_activity) runs synchronously within
+            # the workflow before the 60-second sleep. Poll briefly until the row
+            # appears in SQLite (usually < 200 ms).
+            import time as _time
+            for _ in range(20):
+                try:
+                    ticket = get_ticket(ticket_id)
+                    return self._json_response(ticket.to_dict(), 201)
+                except ValueError:
+                    _time.sleep(0.1)
+
+            return self._json_response({"error": "ticket_not_ready"}, 503)
+
+        # ── POST /tickets/{id}/claim ───────────────────────────────────────
         if self.path.startswith("/tickets/") and self.path.endswith("/claim"):
             path_parts = self.path.split("/")
             if len(path_parts) < 3:
@@ -90,15 +163,46 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             agent = data.get("agent")
             if not agent:
                 return self._json_response({"error": "agent_required"}, 400)
+
+            # Check ticket exists and is still open before signalling.
             try:
-                ticket = claim_ticket(ticket_id, agent)
-            except TicketConflictError as exc:
-                return self._json_response(
-                    {"error": "ticket_not_open", "current_status": str(exc)}, 409
-                )
+                ticket = get_ticket(ticket_id)
             except ValueError:
                 return self._json_response({"error": "ticket_not_found"}, 404)
-            return self._json_response(ticket.to_dict(), 200)
+
+            if ticket.status != "open":
+                return self._json_response(
+                    {"error": "ticket_not_open", "current_status": ticket.status}, 409
+                )
+
+            try:
+                client = get_temporal_client()
+                handle: WorkflowHandle = client.get_workflow_handle(ticket_id)
+                # Send the claim_signal to the running SlaWorkflow.
+                # The workflow will call claim_ticket_activity to persist it.
+                _run_async(handle.signal(SlaWorkflow.claim_signal, agent))
+            except RPCError as exc:
+                return self._json_response({"error": f"workflow_not_found: {exc}"}, 409)
+            except Exception as exc:
+                return self._json_response({"error": f"temporal_error: {exc}"}, 503)
+
+            # Poll until the claim is persisted to SQLite by the workflow activity.
+            import time as _time
+            for _ in range(20):
+                try:
+                    ticket = get_ticket(ticket_id)
+                    if ticket.status == "claimed":
+                        return self._json_response(ticket.to_dict(), 200)
+                except ValueError:
+                    pass
+                _time.sleep(0.1)
+
+            # Return the latest known state even if not yet claimed in DB.
+            try:
+                ticket = get_ticket(ticket_id)
+                return self._json_response(ticket.to_dict(), 200)
+            except ValueError:
+                return self._json_response({"error": "ticket_not_found"}, 404)
 
         self._json_response({"error": "not_found"}, 404)
 
@@ -162,19 +266,33 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
 
         self._json_response({"error": "not_found"}, 404)
 
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+        """Suppress default access log noise to keep console clean."""
+        pass
+
 
 def run_server() -> None:
     init_ticket_table()
-    scheduler = SlaScheduler()
-    scheduler.start()
+
+    # Start the async event loop in a background daemon thread.
+    loop_thread = threading.Thread(target=_start_event_loop, daemon=True)
+    loop_thread.start()
+
+    # Pre-connect to Temporal so the first request is fast.
+    try:
+        get_temporal_client()
+        print("✓ Connected to Temporal server.")
+    except Exception as exc:
+        print(f"⚠ WARNING: Could not connect to Temporal ({exc})")
+        print("  Make sure 'temporal server start-dev' is running before sending requests.")
+
     server = HTTPServer((HOST, PORT), TicketRequestHandler)
-    print(f"Server running at http://{HOST}:{PORT}")
+    print(f"✓ HTTP server running at http://{HOST}:{PORT}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
-        scheduler.stop()
         server.server_close()
 
 
