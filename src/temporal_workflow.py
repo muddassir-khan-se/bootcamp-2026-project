@@ -20,8 +20,17 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
+    import sys as _sys
+    import os as _os
+    # Ensure the src/ directory is on sys.path so that the absolute import
+    # 'temporal_activities' resolves correctly inside the Temporal sandbox,
+    # which does not support relative imports.
+    _src_dir = _os.path.dirname(_os.path.abspath(__file__))
+    if _src_dir not in _sys.path:
+        _sys.path.insert(0, _src_dir)
+
     try:
-        from .temporal_activities import (
+        from temporal_activities import (
             ClaimTicketInput,
             EscalateTicketInput,
             NotifyManagerInput,
@@ -33,7 +42,7 @@ with workflow.unsafe.imports_passed_through():
             save_ticket_activity,
         )
     except ImportError:
-        from temporal_activities import (
+        from .temporal_activities import (
             ClaimTicketInput,
             EscalateTicketInput,
             NotifyManagerInput,
