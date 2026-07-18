@@ -25,16 +25,22 @@ from temporalio.service import RPCError
 try:
     from .temporal_workflow import SlaWorkflow, TASK_QUEUE, TicketWorkflowInput
     from .ticket_service import (
+        create_ticket,
+        claim_ticket,
         get_all_tickets,
         get_ticket,
         init_ticket_table,
+        TicketConflictError,
     )
 except ImportError:
     from temporal_workflow import SlaWorkflow, TASK_QUEUE, TicketWorkflowInput
     from ticket_service import (
+        create_ticket,
+        claim_ticket,
         get_all_tickets,
         get_ticket,
         init_ticket_table,
+        TicketConflictError,
     )
 
 HOST = "127.0.0.1"
@@ -48,6 +54,7 @@ TEMPORAL_HOST = "localhost:7233"
 
 _loop: Optional[asyncio.AbstractEventLoop] = None
 _temporal_client: Optional[Client] = None
+_temporal_available: bool = False  # set to True when Temporal connects successfully
 
 
 def _start_event_loop() -> None:
@@ -124,31 +131,38 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             # This lets us signal the workflow later using the same ID.
             ticket_id = str(uuid.uuid4())
 
-            try:
-                client = get_temporal_client()
-                _run_async(
-                    client.start_workflow(
-                        SlaWorkflow.run,
-                        TicketWorkflowInput(ticket_id=ticket_id, subject=subject),
-                        id=ticket_id,
-                        task_queue=TASK_QUEUE,
-                    )
-                )
-            except Exception as exc:
-                return self._json_response({"error": f"temporal_error: {exc}"}, 503)
-
-            # The first activity (save_ticket_activity) runs synchronously within
-            # the workflow before the 60-second sleep. Poll briefly until the row
-            # appears in SQLite (usually < 200 ms).
-            import time as _time
-            for _ in range(20):
+            if _temporal_available:
                 try:
-                    ticket = get_ticket(ticket_id)
-                    return self._json_response(ticket.to_dict(), 201)
-                except ValueError:
-                    _time.sleep(0.1)
+                    client = get_temporal_client()
+                    _run_async(
+                        client.start_workflow(
+                            SlaWorkflow.run,
+                            TicketWorkflowInput(ticket_id=ticket_id, subject=subject),
+                            id=ticket_id,
+                            task_queue=TASK_QUEUE,
+                        )
+                    )
+                except Exception as exc:
+                    return self._json_response({"error": f"temporal_error: {exc}"}, 503)
 
-            return self._json_response({"error": "ticket_not_ready"}, 503)
+                # The first activity (save_ticket_activity) runs synchronously within
+                # the workflow before the 60-second sleep. Poll briefly until the row
+                # appears in SQLite (usually < 200 ms).
+                import time as _time
+                for _ in range(20):
+                    try:
+                        ticket = get_ticket(ticket_id)
+                        return self._json_response(ticket.to_dict(), 201)
+                    except ValueError:
+                        _time.sleep(0.1)
+                return self._json_response({"error": "ticket_not_ready"}, 503)
+            else:
+                # Temporal not available — create directly in SQLite (fallback mode).
+                try:
+                    ticket = create_ticket(subject)
+                    return self._json_response(ticket.to_dict(), 201)
+                except Exception as exc:
+                    return self._json_response({"error": str(exc)}, 500)
 
         # ── POST /tickets/{id}/claim ───────────────────────────────────────
         if self.path.startswith("/tickets/") and self.path.endswith("/claim"):
@@ -175,34 +189,43 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
                     {"error": "ticket_not_open", "current_status": ticket.status}, 409
                 )
 
-            try:
-                client = get_temporal_client()
-                handle: WorkflowHandle = client.get_workflow_handle(ticket_id)
-                # Send the claim_signal to the running SlaWorkflow.
-                # The workflow will call claim_ticket_activity to persist it.
-                _run_async(handle.signal(SlaWorkflow.claim_signal, agent))
-            except RPCError as exc:
-                return self._json_response({"error": f"workflow_not_found: {exc}"}, 409)
-            except Exception as exc:
-                return self._json_response({"error": f"temporal_error: {exc}"}, 503)
+            if _temporal_available:
+                try:
+                    client = get_temporal_client()
+                    handle: WorkflowHandle = client.get_workflow_handle(ticket_id)
+                    _run_async(handle.signal(SlaWorkflow.claim_signal, agent))
+                except RPCError as exc:
+                    return self._json_response({"error": f"workflow_not_found: {exc}"}, 409)
+                except Exception as exc:
+                    return self._json_response({"error": f"temporal_error: {exc}"}, 503)
 
-            # Poll until the claim is persisted to SQLite by the workflow activity.
-            import time as _time
-            for _ in range(20):
+                # Poll until the claim is persisted to SQLite by the workflow activity.
+                import time as _time
+                for _ in range(20):
+                    try:
+                        ticket = get_ticket(ticket_id)
+                        if ticket.status == "claimed":
+                            return self._json_response(ticket.to_dict(), 200)
+                    except ValueError:
+                        pass
+                    _time.sleep(0.1)
+
                 try:
                     ticket = get_ticket(ticket_id)
-                    if ticket.status == "claimed":
-                        return self._json_response(ticket.to_dict(), 200)
+                    return self._json_response(ticket.to_dict(), 200)
                 except ValueError:
-                    pass
-                _time.sleep(0.1)
-
-            # Return the latest known state even if not yet claimed in DB.
-            try:
-                ticket = get_ticket(ticket_id)
-                return self._json_response(ticket.to_dict(), 200)
-            except ValueError:
-                return self._json_response({"error": "ticket_not_found"}, 404)
+                    return self._json_response({"error": "ticket_not_found"}, 404)
+            else:
+                # Temporal not available — claim directly in SQLite (fallback mode).
+                try:
+                    ticket = claim_ticket(ticket_id, agent)
+                    return self._json_response(ticket.to_dict(), 200)
+                except TicketConflictError as exc:
+                    return self._json_response(
+                        {"error": "ticket_not_open", "current_status": str(exc)}, 409
+                    )
+                except ValueError:
+                    return self._json_response({"error": "ticket_not_found"}, 404)
 
         self._json_response({"error": "not_found"}, 404)
 
@@ -286,12 +309,16 @@ def run_server() -> None:
         _time.sleep(0.05)
 
     # Pre-connect to Temporal so the first request is fast.
+    global _temporal_available
     try:
         get_temporal_client()
-        print("Connected to Temporal server.")
+        _temporal_available = True
+        print("Connected to Temporal server — full workflow mode active.")
     except Exception as exc:
+        _temporal_available = False
         print(f"WARNING: Could not connect to Temporal ({exc})")
-        print("  Make sure 'temporal server start-dev' is running before sending requests.")
+        print("  Running in FALLBACK MODE — tickets will be saved directly to SQLite.")
+        print("  Start 'temporal server start-dev' + 'py src/worker.py' for full SLA workflow mode.")
 
     server = HTTPServer((HOST, PORT), TicketRequestHandler)
     print(f"HTTP server running at http://{HOST}:{PORT}")
