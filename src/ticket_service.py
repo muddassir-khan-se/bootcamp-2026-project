@@ -35,7 +35,9 @@ CREATE TABLE IF NOT EXISTS tickets (
 """
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-NOTIFY_LOG = Path(os.environ.get("NOTIFY_LOG_PATH", str(_PROJECT_ROOT / "notify.log")))
+
+def get_notify_log_path() -> Path:
+    return Path(os.environ.get("NOTIFY_LOG_PATH", str(_PROJECT_ROOT / "notify.log")))
 
 
 class TicketConflictError(Exception):
@@ -106,16 +108,6 @@ def claim_ticket(ticket_id: str, agent: str) -> Ticket:
         return _row_to_ticket(row)
 
 
-def get_due_tickets() -> List[Ticket]:
-    now_iso = datetime.now(timezone.utc).isoformat()
-    with db_connection() as conn:
-        cursor = conn.execute(
-            "SELECT * FROM tickets WHERE status = ? AND sla_deadline <= ?",
-            ("open", now_iso),
-        )
-        return [_row_to_ticket(row) for row in cursor.fetchall()]
-
-
 def get_all_tickets() -> List[Ticket]:
     with db_connection() as conn:
         cursor = conn.execute("SELECT * FROM tickets ORDER BY created_at DESC")
@@ -129,22 +121,12 @@ def escalate_ticket(ticket_id: str) -> Ticket:
             ("escalated", datetime.now(timezone.utc).isoformat(), ticket_id, "open"),
         )
         conn.commit()
-        if cursor.rowcount == 0:
-            return get_ticket(ticket_id)
     return get_ticket(ticket_id)
 
 
 def notify_manager(ticket_id: str, breach_time: str) -> None:
     message = f"[notify_manager] Ticket {ticket_id} breached SLA at {breach_time}\n"
-    with open(NOTIFY_LOG, "a", encoding="utf-8") as fd:
+    with open(get_notify_log_path(), "a", encoding="utf-8") as fd:
         fd.write(message)
 
 
-def escalate_due_tickets() -> int:
-    escalated = 0
-    for ticket in get_due_tickets():
-        updated = escalate_ticket(ticket.id)
-        if updated.status == "escalated":
-            notify_manager(ticket.id, updated.escalated_at.isoformat())
-            escalated += 1
-    return escalated
