@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Generator
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "tickets.db"
-DB_LOCK = threading.Lock()
+DB_LOCK = threading.RLock()
 
 def get_db_path() -> Path:
     return Path(os.environ.get("TICKETS_DB_PATH", str(DEFAULT_DB_PATH)))
